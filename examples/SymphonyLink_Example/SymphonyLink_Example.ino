@@ -1,8 +1,9 @@
 #include <SymphonyLink.h>
 
-#define SL_RESET_PIN 2
+#define SL_RESET_PIN 7
 #define SL_BOOT_PIN 8
 #define SL_IRQ_PIN 13
+
 
 SymphonyLink symlink;
 
@@ -51,11 +52,9 @@ void setup()
 
 	//Wait until the module is connected to the network. This could be part of the 
 	//main loop if the module is going to be shutdown as part of the application
-	while (symlink.connected == false)
+	while (READ_TO_SEND != symlink.updateModemState())
 	{
 		Serial.write("Waiting to connect\n");
-		symlink.updateStatus();
-		
 		delay(1000);		//This could be shorter
 	}
 }
@@ -69,44 +68,15 @@ uint8_t len;
 
 void loop()
 {
-
 	
-	//Get an updated status of the module
-	if(symlink.updateStatus())
+	if (READ_TO_SEND == symlink.updateModemState())
 	{
-		//Check for connection.  If the module is not connected to the network
-		//it will scan and keep trying
-		if (symlink.connected)
-		{
-			//Send simple counter
-			data[0]++;
-			
-			//Write bytes to Conductor
-			success =  symlink.write(data, 2);
-			if( success)
-			{
-				Serial.print("Wrote bytes!  ");
-				Serial.print(data[0]);
-				Serial.print("\n");
-			}
-			else
-			{
-				Serial.println("Didn't write bytes");
-			}
-			
-			//Try to read bytes.  IF nothing is available, then the device will return false
-			success = symlink.read(rxdata, &len);
-			if (success)
-			{
-				//Print out data received.
-				Serial.write(rxdata,len);
-			}
-		}
-	}
-	else
-	{
-		Serial.write("Error with update status\n");
-		data[1]++;
+		//Send simple counter
+		data[0]++;
+	
+		//Write bytes to Conductor
+		symlink.write(data, 2);
+		delay(500);
 	}
 
 	delay(100);
