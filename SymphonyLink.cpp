@@ -16,7 +16,18 @@ SymphonyLink::SymphonyLink()
 	
 }
 
-boolean SymphonyLink::get_irq(uint32_t flagsToClear)
+boolean SymphonyLink::setAntenna(AntennaMode ant)
+{
+	if(0 > ll_antenna_set(ant))
+	{
+		Serial.write("Error ll_antenna_set\n");
+		return false;
+	}
+	return true;
+		
+}
+
+boolean SymphonyLink::getIRQ(uint32_t flagsToClear)
 {
 	//clear flags from reseting and connecting
 	if(0 > ll_irq_flags(flagsToClear,&_IRQ))
@@ -31,15 +42,21 @@ boolean SymphonyLink::get_irq(uint32_t flagsToClear)
 	
 }
 
-boolean SymphonyLink::get_state(void)
+boolean SymphonyLink::getState(void)
 {
 	if(0 > ll_get_state(&_modState,&_txState,&_rxState))
 	{
-		Serial.write("Error get_state\n");
+		
+		Serial.write("Error getState\n");
 		return false;
 	}
 	else
 	{
+		/*
+			Serial.print("modstate=");
+			Serial.print(_modState);
+			Serial.print("\n");
+		*/
 		return true;
 	}
 }
@@ -48,11 +65,33 @@ boolean SymphonyLink::get_state(void)
 boolean SymphonyLink::begin(uint32_t net_token, uint8_t* app_token, DownlinkMode dl_mode, uint8_t qos)
 {
 	uint8_t i;
+	ll_mac_type_t mac_mode;
 	
 	
-	get_irq(0);
+	getIRQ(0);
 	
-	get_state();
+	//Read the MAC mode of the module.  Set to Symphony Link mode if not already set
+	if(0 > ll_mac_mode_get(&mac_mode))
+	{
+		Serial.write("Error ll_mac_mode_get\n");
+		return false;
+	}
+	
+	
+	//Setting the mode requires the module to reset and a 2 second delay should be inserted
+	//until the module's host interface is back on line.
+	if(mac_mode != SYMPHONY_LINK)
+	{
+		if(0 > ll_mac_mode_set(SYMPHONY_LINK))
+		{
+			Serial.write("Error ll_mac_mode_set\n");
+			return false;
+		}
+		Serial.write("Setting to Symphony Link Mode\n");
+		delay(2000);
+	}
+	
+	getState();
 
 	
 	_net_token = net_token;
@@ -111,6 +150,7 @@ boolean SymphonyLink::write(uint8_t* buf, uint16_t len)
 		if(_txState == LL_TX_STATE_TRANSMITTING)
 		{
 			  delay(100);
+			  Serial.write("Error Write - Not connected\n");
 			  return false;
 		}
 		else
@@ -127,7 +167,7 @@ boolean SymphonyLink::write(uint8_t* buf, uint16_t len)
 	}
 	
 	//get the IRQ flags
-	if( false==get_irq(0))
+	if( false==getIRQ(0))
 	{
 		return false;
 	}
@@ -139,14 +179,14 @@ boolean SymphonyLink::write(uint8_t* buf, uint16_t len)
 		delay(100);
 		
 		//get the IRQ flags
-		if( false==get_irq(0))
+		if( false==getIRQ(0))
 		{
 			return false;
 		}
 		
 	}
 	
-	if( false==get_irq(IRQ_FLAGS_TX_DONE))
+	if( false==getIRQ(IRQ_FLAGS_TX_DONE))
 	{
 		return false;
 	}
@@ -186,7 +226,7 @@ boolean SymphonyLink::read(uint8_t* buf, uint8_t* len)
 boolean SymphonyLink::updateStatus(void)
 {
 	
-	if(false==get_irq(0))
+	if(false==getIRQ(0))
 	{
 		return false;
 	}
@@ -194,7 +234,7 @@ boolean SymphonyLink::updateStatus(void)
 	{
 		
 		
-		if(false==get_state())
+		if(false==getState())
 		{
 			return false;	
 		}

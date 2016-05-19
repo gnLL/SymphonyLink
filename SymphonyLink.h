@@ -14,6 +14,11 @@ enum DownlinkMode
 	MAILBOX	
 };
 
+enum AntennaMode
+{
+	UFL = 1,
+	TRACE = 2
+};
 
 class SymphonyLink {
 	
@@ -29,7 +34,7 @@ class SymphonyLink {
 		enum ll_state getModState();
 		uint32_t getISR();
 		volatile boolean connected;
-		
+		boolean setAntenna(AntennaMode ant);
 		
 	
 		
@@ -44,8 +49,8 @@ class SymphonyLink {
 		ll_state _modState;
 		uint32_t _IRQ;
 		
-		boolean get_irq(uint32_t flagsToClear);
-		boolean get_state(void);
+		boolean getIRQ(uint32_t flagsToClear);
+		boolean getState(void);
 		
 		
 		

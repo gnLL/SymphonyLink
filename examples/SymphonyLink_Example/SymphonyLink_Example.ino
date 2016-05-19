@@ -6,7 +6,8 @@
 
 SymphonyLink symlink;
 
-void setup() {
+void setup() 
+{
 
 
 	//configure these to match your network and application tokens
@@ -42,6 +43,8 @@ void setup() {
 	delay(2000);
 
 	Serial.write("Starting system\n");
+	
+	symlink.setAntenna(UFL);
 
 	//send configuration data to initial the device
 	symlink.begin(network_token, app_token, ON, 15);
@@ -66,6 +69,7 @@ uint8_t len;
 
 void loop()
 {
+
 	
 	//Get an updated status of the module
 	if(symlink.updateStatus())
@@ -81,7 +85,9 @@ void loop()
 			success =  symlink.write(data, 2);
 			if( success)
 			{
-				Serial.println("Wrote bytes!");
+				Serial.print("Wrote bytes!  ");
+				Serial.print(data[0]);
+				Serial.print("\n");
 			}
 			else
 			{
