@@ -3,6 +3,120 @@
 #include "ll_ifc_symphony.h"
 
 
+
+modemState SymphonyLink::updateModemState(void)
+{
+	//clear all flags
+	getIRQ(0xFFFFFFFF);
+	
+	getState();
+	
+	switch (_state)
+	{
+		case INIT:
+			Serial.write("State: INIT\r");
+			
+			//configure module and start connection
+			if(0 > ll_config_set(_net_token, _app_token, _downlink_mode, _qos))
+			{
+				Serial.write("Error ll_config_set\n");
+			}
+			else
+			{
+				Serial.write("Symphony Initialized\n");
+			
+				_state = CONNECTING;
+			}
+			
+			break;
+			
+		case CONNECTING:
+			Serial.write("State: CONNECTING\r");
+			
+			switch(_modState)
+			{
+				case LL_STATE_INITIALIZING:
+					_state = LINK_INIT;
+				break;
+				case LL_STATE_IDLE_CONNECTED:
+					Serial.write("\nConnected\n");
+					_state = READ_TO_SEND;
+				break;
+				case LL_STATE_IDLE_DISCONNECTED:
+					//keep looping
+				break;
+				case  LL_STATE_ERROR:
+					Serial.write("\nSTATE_ERROR\n");
+					_state = INIT;
+				break;
+				default:
+					Serial.write("\nBAD STATE\n");
+			}
+
+			break;
+		case LINK_INIT:
+			Serial.write("State: Initializing\r");
+			switch(_modState)
+				{
+					case LL_STATE_INITIALIZING:
+						_state = LINK_INIT;
+					break;
+					case LL_STATE_IDLE_CONNECTED:
+						Serial.write("\nConnected\n");
+						_state = READ_TO_SEND;
+					break;
+					case LL_STATE_IDLE_DISCONNECTED:
+						//keep looping
+					break;
+					case  LL_STATE_ERROR:
+						Serial.write("\nSTATE_ERROR\n");
+						_state = INIT;
+					break;
+					default:
+						Serial.write("\nBAD STATE\n");
+				}
+				break;
+				
+		case READ_TO_SEND:
+			
+			//device is ready to send data.  Waiting for message to send.
+			if (_modState!=LL_STATE_IDLE_CONNECTED)
+			{
+				Serial.write("Device lost connection\n");
+				_state = INIT;
+			}
+			else if(_txState == LL_TX_STATE_TRANSMITTING)
+			{
+				_state = SENDING_FRAME;
+			}
+			break;
+				
+		case SENDING_FRAME:
+		
+			Serial.write("State: SENDING_FRAME\r");
+			if ((_IRQ & IRQ_FLAGS_TX_DONE) != 0)
+			{
+				Serial.write("\nSent message!!!!!!\n");
+				//clear the flasg
+				getIRQ(IRQ_FLAGS_TX_ERROR);
+				_state = READ_TO_SEND;
+				
+			}
+			else if  ((_IRQ & IRQ_FLAGS_TX_ERROR) != 0)
+			{
+				Serial.write("\nError sending frame\n");
+				getIRQ(IRQ_FLAGS_TX_ERROR);
+
+				_state = SENDING_FRAME;
+			}
+			break;
+
+		default:
+			while(1);
+	}
+	return	_state;
+}
+
 SymphonyLink::SymphonyLink()
 {
 	//Set values to zero or default states
@@ -11,7 +125,7 @@ SymphonyLink::SymphonyLink()
 	memset(_app_token, 0, APP_TOKEN_LEN);
 	_downlink_mode = LL_DL_OFF;
 	_qos = 0;
-	connected = false;
+	_state = INIT;
 	
 	
 }
@@ -47,7 +161,7 @@ boolean SymphonyLink::getState(void)
 	if(0 > ll_get_state(&_modState,&_txState,&_rxState))
 	{
 		
-		Serial.write("Error getState\n");
+		Serial.write("Error getModState\n");
 		return false;
 	}
 	else
@@ -70,6 +184,8 @@ boolean SymphonyLink::begin(uint32_t net_token, uint8_t* app_token, DownlinkMode
 	
 	getIRQ(0);
 	
+	
+	
 	//Read the MAC mode of the module.  Set to Symphony Link mode if not already set
 	if(0 > ll_mac_mode_get(&mac_mode))
 	{
@@ -91,11 +207,9 @@ boolean SymphonyLink::begin(uint32_t net_token, uint8_t* app_token, DownlinkMode
 		delay(2000);
 	}
 	
-	getState();
-
-	
 	_net_token = net_token;
 
+	//Make local copy of apptoken
 	for(i=0;i<APP_TOKEN_LEN; i++)
 	{
 		_app_token[i] = app_token[i];
@@ -118,22 +232,10 @@ boolean SymphonyLink::begin(uint32_t net_token, uint8_t* app_token, DownlinkMode
 	
 	_qos = qos;
 	
-	connected = false;
-
-	Serial.write("sending config\n");
-	//configure module and start connection
-	if(0 > ll_config_set(_net_token, _app_token, _downlink_mode, _qos))
-	{
-		Serial.write("Error ll_config_set\n");
-		return false;
-	}
-	
 	delay(100);
 	
-	updateStatus();
-	
+	updateModemState();
 	return true;
-
 
 }
 
@@ -141,24 +243,26 @@ boolean SymphonyLink::begin(uint32_t net_token, uint8_t* app_token, DownlinkMode
 
 boolean SymphonyLink::write(uint8_t* buf, uint16_t len)
 {
+	int32_t ret;
 	
-	//First make sure we are connected
-	if (_modState == LL_STATE_IDLE_CONNECTED )
-	{
-		//Check to see if we are currently transmitting
-		//Send packet if not
-		if(_txState == LL_TX_STATE_TRANSMITTING)
+	updateModemState();
+	
+	if (_state==READ_TO_SEND)
+	{							
+		ret = ll_message_send_ack(buf,len);
+		if(ret<0)
 		{
-			  delay(100);
-			  Serial.write("Error Write - Not connected\n");
-			  return false;
+			Serial.write("Error sending frame\n");
+			updateModemState();
+			return false;
 		}
 		else
 		{
-			 if(0 > ll_message_send_ack(buf,len))
-			 {
-				 Serial.write("Error ll_message_send_ack\n");
-			 }
+			while(_state != SENDING_FRAME)
+			{
+				updateModemState();
+				delay(100);
+			}
 		}
 	}
 	else
@@ -166,34 +270,8 @@ boolean SymphonyLink::write(uint8_t* buf, uint16_t len)
 		return false;
 	}
 	
-	//get the IRQ flags
-	if( false==getIRQ(0))
-	{
-		return false;
-	}
-	
-	//Keep looping until transmitt is done.
-	//ToDo: refactor this into a new function so the main loop doesn not need to spin //on it
-	while ((_IRQ & IRQ_FLAGS_TX_DONE) == 0)
-	{
-		delay(100);
-		
-		//get the IRQ flags
-		if( false==getIRQ(0))
-		{
-			return false;
-		}
-		
-	}
-	
-	if( false==getIRQ(IRQ_FLAGS_TX_DONE))
-	{
-		return false;
-	}
-	
-	
-	
 	return true;
+
 }
 
 
@@ -219,42 +297,6 @@ boolean SymphonyLink::read(uint8_t* buf, uint8_t* len)
 	else
 	{
 		return false;
-	}
-	
-}
-
-boolean SymphonyLink::updateStatus(void)
-{
-	
-	if(false==getIRQ(0))
-	{
-		return false;
-	}
-	else
-	{
-		
-		
-		if(false==getState())
-		{
-			return false;	
-		}
-		else
-		{
-			if(_modState == LL_STATE_IDLE_CONNECTED )
-			{
-				connected = true;
-			}
-			else
-			{
-				connected = false;
-			}
-			return true;	
-		}
-		
-		if(_rxState == LL_RX_STATE_RECEIVED_MSG)
-		{
-			
-		}
 	}
 	
 }
